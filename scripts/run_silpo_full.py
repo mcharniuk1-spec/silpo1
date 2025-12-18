@@ -26,6 +26,7 @@ def main() -> None:
     logger.event("START", "silpo_full", f"category={settings.category_url}", {"max_pages": settings.max_pages})
     status = "ok"
     note = ""
+    rows_written = 0
 
     try:
         tpl = build_api_template(
@@ -42,16 +43,15 @@ def main() -> None:
             max_pages=settings.max_pages,
             debug_dir=settings.debug_dir,
         )
-        logger.event("SCRAPE", "done", f"rows={len(rows)}")
+        rows_written = len(rows)
+        logger.event("SCRAPE", "done", f"rows={rows_written}")
 
-        # outputs (latest)
         out_csv = settings.outputs_dir / "silpo_raw_last.csv"
         out_xlsx = settings.outputs_dir / "silpo_raw_last.xlsx"
         write_csv(out_csv, rows)
         write_xlsx(out_xlsx, rows)
         logger.event("WRITE", "files_last", "saved", {"csv": str(out_csv), "xlsx": str(out_xlsx)})
 
-        # outputs (timestamped snapshot)
         safe_ts = run_ts.replace(":", "-")
         snap_csv = settings.outputs_dir / f"silpo_raw_{safe_ts}.csv"
         snap_xlsx = settings.outputs_dir / f"silpo_raw_{safe_ts}.xlsx"
@@ -59,9 +59,8 @@ def main() -> None:
         write_xlsx(snap_xlsx, rows)
         logger.event("WRITE", "files_snapshot", "saved", {"csv": str(snap_csv), "xlsx": str(snap_xlsx)})
 
-        # db append
         insert_rows(db_path, rows)
-        logger.event("WRITE", "db", "appended", {"db": str(db_path), "rows": len(rows)})
+        logger.event("WRITE", "db", "appended", {"db": str(db_path), "rows": rows_written})
 
     except Exception as e:
         status = "error"
@@ -69,14 +68,13 @@ def main() -> None:
         logger.event("ERROR", "silpo_full", note)
         raise
     finally:
-        # log run in db
         try:
             log_run(
                 db_path=db_path,
                 run_ts=run_ts,
                 category_url=settings.category_url,
                 max_pages=settings.max_pages,
-                rows_written=0,  # precise rows written are in file+log; keep minimal to avoid double count ambiguity
+                rows_written=rows_written,
                 status=status,
                 note=note[:800],
             )

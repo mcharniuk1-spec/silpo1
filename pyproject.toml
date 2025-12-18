@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "silpo"
+version = "0.1.0"
+description = "Silpo category scraper (CSV/XLSX/SQLite)"
+requires-python = ">=3.11"
+dependencies = [
+  "playwright==1.49.1",
+  "requests==2.32.3",
+  "pandas==2.2.3",
+  "openpyxl==3.1.5",
+  "python-dateutil==2.9.0.post0",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

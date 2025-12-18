@@ -14,7 +14,7 @@ class ApiTemplate:
     body: Dict[str, Any]
 
 def _safe_headers(h: Dict[str, str], category_url: str, user_agent: str) -> Dict[str, str]:
-    allow = {"accept","accept-language","content-type","origin","referer","user-agent"}
+    allow = {"accept", "accept-language", "content-type", "origin", "referer", "user-agent"}
     out: Dict[str, str] = {}
     for k, v in h.items():
         lk = k.lower()
@@ -81,16 +81,28 @@ def discover_get_category_products_template(
                 captured["body"] = body
 
         page.on("request", on_request)
+
         page.goto(category_url, wait_until="domcontentloaded", timeout=timeout_ms)
-        page.wait_for_timeout(6000)
+
+        # 3 tries: (1) wait, (2) scroll, (3) wait again
+        for i in range(3):
+            if captured:
+                break
+            page.wait_for_timeout(2500)
+            if i == 1:
+                # scroll triggers lazy load/network on some builds
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.35)")
+                page.wait_for_timeout(1500)
+                page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.75)")
+            page.wait_for_timeout(2000)
 
         cookies = _cookies_to_dict(context.cookies())
         browser.close()
 
         if not captured:
             raise RuntimeError(
-                "API template not captured: GetCategoryProducts не спіймано. "
-                "Якщо Silpo грузить товари лише після взаємодії — додайте scroll/click у discovery."
+                "API template not captured: GetCategoryProducts не спіймано після wait/scroll. "
+                "Ймовірно Silpo блокує headless або змінив механіку каталогу."
             )
 
         headers = _safe_headers(captured.get("headers", {}), category_url, user_agent)

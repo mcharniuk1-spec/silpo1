@@ -1,0 +1,49 @@
+name: Silpo1 Full Scraper (Daily)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * *"   # daily at 03:00 UTC (adjust if needed)
+
+concurrency:
+  group: silpo1-full-scraper
+  cancel-in-progress: false
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+
+      - name: Run scraper
+        env:
+          SILPO_MAX_PAGES: "10"
+          SILPO_HEADLESS: "true"
+          # Crucial: ensure src/ is importable in CI even if packaging is imperfect
+          PYTHONPATH: ${{ github.workspace }}/src
+        run: |
+          python -m scripts.run_silpo_full
+
+      - name: Upload artifacts (db, exports, logs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: silpo1_outputs
+          path: |
+            data/silpo.sqlite
+            data/exports/*.xlsx
+            data/exports/*.csv
+            data/logs/*.jsonl
+            data/html_snapshots/*.html

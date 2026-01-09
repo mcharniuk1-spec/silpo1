@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+
+data/**/*.sqlite
+data/exports/*.xlsx
+data/exports/*.csv
+data/logs/*.jsonl
+data/html_snapshots/*.html
+
+!data/.gitkeep

@@ -1,16 +1,17 @@
-## Silpo Full Scraper (CSV/XLSX/SQLite)
+# silpo1 — Full Scraper (dairy category)
 
-Pipeline:
-1) Playwright відкриває сторінку категорії та перехоплює API-запит GetCategoryProducts (кешує template).
-2) Далі сторінки 1..N качаються напряму через API.
-3) Результати зберігаються у:
-   - data/outputs/*.csv
-   - data/outputs/*.xlsx
-   - data/db/silpo.sqlite
-   - data/logs/silpo_run_log.jsonl
-   - data/debug/*.json (API responses + template)
+This repo scrapes Silpo dairy category pages (default 10 pages) and stores results into:
+- SQLite: `data/silpo.sqlite`
+- Exports: `data/exports/latest.xlsx` and `data/exports/latest.csv`
+- Logs: `data/logs/run_*.jsonl`
+- HTML snapshots (only on challenge): `data/html_snapshots/*.html`
 
-Run locally:
-- pip install -r requirements.txt
-- playwright install chromium
-- python -m scripts.run_silpo_full
+## Run locally
+```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+python -m playwright install chromium
+
+# run (default 10 pages)
+python -m scripts.run_silpo_full

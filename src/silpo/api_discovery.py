@@ -1,118 +1,90 @@
 import json
 from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from playwright.sync_api import sync_playwright
 
+from .config import settings
+
 @dataclass
 class ApiTemplate:
+    """Captured API request template"""
     endpoint: str
     method: str
     headers: Dict[str, str]
     cookies: Dict[str, str]
     body: Dict[str, Any]
 
-def _safe_headers(h: Dict[str, str], category_url: str, user_agent: str) -> Dict[str, str]:
-    allow = {"accept", "accept-language", "content-type", "origin", "referer", "user-agent"}
-    out: Dict[str, str] = {}
-    for k, v in h.items():
-        lk = k.lower()
-        if lk in allow:
-            out[lk] = v
-    out.setdefault("accept", "application/json, text/plain, */*")
-    out.setdefault("content-type", "application/json")
-    out["referer"] = category_url
-    out.setdefault("origin", "https://silpo.ua")
-    out["user-agent"] = user_agent
-    return out
-
-def _cookies_to_dict(cookies_list) -> Dict[str, str]:
-    out: Dict[str, str] = {}
-    for c in cookies_list:
-        n = c.get("name")
-        v = c.get("value")
-        if n and v:
-            out[n] = v
-    return out
-
-def load_cached_template(path: Path) -> ApiTemplate | None:
-    if not path.exists():
-        return None
-    try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return ApiTemplate(**data)
-    except Exception:
-        return None
-
-def save_template(path: Path, tpl: ApiTemplate) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(tpl.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
-
-def discover_get_category_products_template(
-    category_url: str,
-    user_agent: str,
-    timeout_ms: int,
-    cache_path: Path,
-) -> ApiTemplate:
-    target_substr = "product-api.silpo.ua/api/v1/Product/GetCategoryProducts"
-
-    cached = load_cached_template(cache_path)
-    if cached:
-        return cached
+def discover_get_category_products_template() -> ApiTemplate:
+    """
+    Try to capture real API request from browser network.
+    If fails, fallback to ALT API (catalog) if enabled.
+    """
+    captured: Optional[ApiTemplate] = None
+    target = "product-api.silpo.ua/api/v1/Product/GetCategoryProducts"
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context(user_agent=user_agent, locale="uk-UA")
-        page = context.new_page()
-
-        captured: Dict[str, Any] = {}
+        browser = p.chromium.launch(headless=settings.headless)
+        ctx = browser.new_context(
+            user_agent=settings.user_agent,
+            locale="uk-UA",
+            viewport={"width": 1366, "height": 900},
+        )
+        page = ctx.new_page()
 
         def on_request(req):
-            if target_substr in req.url:
+            nonlocal captured
+            if captured:
+                return
+            url = req.url
+            if target in url:
+                post = req.post_data or ""
                 try:
-                    post = req.post_data or ""
                     body = json.loads(post) if post else {}
                 except Exception:
                     body = {}
-                captured["endpoint"] = req.url
-                captured["method"] = req.method
-                captured["headers"] = dict(req.headers)
-                captured["body"] = body
+                # Minimal safe headers
+                h = {k.lower(): v for k, v in req.headers.items()}
+                headers = {
+                    "accept": h.get("accept", "application/json"),
+                    "content-type": h.get("content-type", "application/json"),
+                    "user-agent": h.get("user-agent", settings.user_agent),
+                    "accept-language": h.get("accept-language", "uk-UA,uk;q=0.9,en;q=0.8"),
+                }
+                cookies = {c["name"]: c["value"] for c in ctx.cookies()}
+                captured = ApiTemplate(
+                    endpoint=url,
+                    method=req.method,
+                    headers=headers,
+                    cookies=cookies,
+                    body=body
+                )
 
         page.on("request", on_request)
-
-        page.goto(category_url, wait_until="domcontentloaded", timeout=timeout_ms)
-
-        # 3 tries: (1) wait, (2) scroll, (3) wait again
-        for i in range(3):
-            if captured:
-                break
-            page.wait_for_timeout(2500)
-            if i == 1:
-                # scroll triggers lazy load/network on some builds
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.35)")
-                page.wait_for_timeout(1500)
-                page.evaluate("window.scrollTo(0, document.body.scrollHeight * 0.75)")
-            page.wait_for_timeout(2000)
-
-        cookies = _cookies_to_dict(context.cookies())
+        page.goto(settings.category_url, wait_until="domcontentloaded")
+        page.wait_for_load_state("networkidle")
         browser.close()
 
-        if not captured:
-            raise RuntimeError(
-                "API template not captured: GetCategoryProducts не спіймано після wait/scroll. "
-                "Ймовірно Silpo блокує headless або змінив механіку каталогу."
-            )
+    if captured:
+        return captured
 
-        headers = _safe_headers(captured.get("headers", {}), category_url, user_agent)
-
-        tpl = ApiTemplate(
-            endpoint=captured["endpoint"],
-            method=captured["method"],
-            headers=headers,
-            cookies=cookies,
-            body=captured.get("body", {}),
+    if settings.use_alt_api:
+        # ALT API: catalog service
+        body = {
+            "query": {"collection": "EcomCatalogGlobal"},
+            "filter": {"category": [234]},
+            "page": {"size": settings.per_page, "number": 1},
+        }
+        return ApiTemplate(
+            endpoint="https://api.catalog.ecom.silpo.ua/api/2.0/exec/EcomCatalogGlobal",
+            method="POST",
+            headers={
+                "content-type": "application/json",
+                "accept": "application/json",
+                "user-agent": settings.user_agent
+            },
+            cookies={},
+            body=body,
         )
-        save_template(cache_path, tpl)
-        return tpl
+
+    raise RuntimeError("API template not captured and ALT API disabled.")

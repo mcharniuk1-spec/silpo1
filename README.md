@@ -1,17 +1,17 @@
-# silpo1 — Full Scraper (dairy category)
+# Silpo.ua Scraper (Python + Playwright)
 
-This repo scrapes Silpo dairy category pages (default 10 pages) and stores results into:
-- SQLite: `data/silpo.sqlite`
-- Exports: `data/exports/latest.xlsx` and `data/exports/latest.csv`
-- Logs: `data/logs/run_*.jsonl`
-- HTML snapshots (only on challenge): `data/html_snapshots/*.html`
+Full dairy/eggs product scraper for Silpo.ua using Python 3.11+, Playwright, and SQLite.
 
-## Run locally
+## Features
+
+- **Dual source**: API (primary) + HTML fallback
+- **Fallback detection**: Cloudflare challenge detection
+- **3-tier persistence**: SQLite (history) + XLSX (readable) + CSV (analytics)
+- **Structured logging**: JSONL file + Excel logs sheet
+- **Environment configurable**: All settings via env vars
+
+## Installation
+
 ```bash
-python -m venv .venv
-source .venv/bin/activate
 pip install -r requirements.txt
-python -m playwright install chromium
-
-# run (default 10 pages)
-python -m scripts.run_silpo_full
+python -m playwright install --with-deps chromium

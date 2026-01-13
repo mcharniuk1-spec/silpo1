@@ -8,15 +8,12 @@ def utc_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 class RunLogger:
-    """
-    Writes JSONL to disk + keeps events in-memory to embed them into XLSX.
-    """
     def __init__(self, jsonl_path: str):
         self.jsonl_path = jsonl_path
         os.makedirs(os.path.dirname(jsonl_path), exist_ok=True)
         self.events: List[LogEvent] = []
 
-        # Verify writable early
+        # Ensure writable early
         with open(self.jsonl_path, "a", encoding="utf-8") as f:
             f.write("")
 

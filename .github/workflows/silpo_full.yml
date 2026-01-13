@@ -1,9 +1,9 @@
-name: Silpo1 Scraper (DB + XLSX + CSV)
+name: Silpo1 Scraper (DB + XLSX + CSV + Logs)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 * * *"  # every 24h
+    - cron: "0 3 * * *"   # every 24h at 03:00 UTC
 
 concurrency:
   group: silpo1-scrape
@@ -12,7 +12,6 @@ concurrency:
 jobs:
   scrape:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -29,30 +28,28 @@ jobs:
           pip install -r requirements.txt
           python -m playwright install --with-deps chromium
 
-      - name: Pre-flight import check
-        env:
-          PYTHONPATH: src
-        run: |
-          python -c "from silpo.config import settings; print('OK config', settings.category_url)"
-
       - name: Run scraper
         env:
-          PYTHONPATH: src
           SILPO_MAX_PAGES: "10"
           SILPO_HEADLESS: "true"
         run: |
-          set -e
-          echo "Run at: $(date)"
           python -m scripts.run_silpo_full
-          echo "==== data tree ===="
-          find data -maxdepth 3 -type f || true
-          echo "==== sizes ===="
-          du -sh data || true
 
-      - name: Upload artifacts (ALWAYS)
+      - name: Verify outputs exist
+        if: always()
+        run: |
+          echo "Listing data/..."
+          find data -maxdepth 3 -type f || true
+          test -f data/silpo.sqlite
+          test -f data/exports/latest.xlsx
+          test -f data/exports/latest.csv
+          ls -la data/logs || true
+
+      - name: Upload artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: silpo1_data_${{ github.run_id }}
+          name: silpo1_outputs_${{ github.run_id }}
           path: data/
           retention-days: 30
+          if-no-files-found: error

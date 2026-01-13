@@ -1,96 +1,74 @@
+import json
 import re
-from typing import List, Optional, Tuple
-from bs4 import BeautifulSoup
+from typing import Any, Dict, List, Optional
 
-from .extractors import (
-    extract_brand, extract_product_type, extract_fat_pct,
-    extract_pack, compute_price_per_unit, to_float
-)
-from .model import ProductRow
+def is_challenge_html(html: str) -> bool:
+    h = html.lower()
+    return ("just a moment" in h) or ("cf-challenge" in h) or ("challenge-error-text" in h)
 
-PRICE_RE = re.compile(r"(\d{1,4}(?:[.,]\d{2})?)\s*грн", re.IGNORECASE)
-DISCOUNT_RE = re.compile(r"-\s*(\d{1,2})\s*%", re.IGNORECASE)
-
-def _parse_prices(text: str) -> Optional[Tuple[float, Optional[float], Optional[float], str]]:
-    """Extract current, old prices and discount from text"""
-    vals = [to_float(x) for x in PRICE_RE.findall(text)]
-    vals = [v for v in vals if v is not None]
-    
-    if not vals:
+def extract_next_data(html: str) -> Optional[dict]:
+    m = re.search(r'<script[^>]+id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
+    if not m:
         return None
-    
-    cur = float(vals[0])
-    old = float(vals[1]) if len(vals) > 1 else None
-    dm = DISCOUNT_RE.search(text)
-    disc = float(dm.group(1)) if dm else None
-    price_type = "discount" if disc is not None else "regular"
-    
-    return cur, old, disc, price_type
+    try:
+        return json.loads(m.group(1))
+    except Exception:
+        return None
 
-def extract_products_from_html(
-    run_id: str,
-    html: str,
-    page_url: str,
-    page_number: int,
-    batch_stamp: str,
-) -> List[ProductRow]:
-    """Parse HTML and extract products"""
-    soup = BeautifulSoup(html, "html.parser")
-    rows: List[ProductRow] = []
-    seen = set()
+def find_productish_nodes(obj: Any, limit: int = 5000) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    stack = [obj]
+    seen = 0
+    while stack and len(out) < limit and seen < 200000:
+        cur = stack.pop()
+        seen += 1
+        if isinstance(cur, dict):
+            keys = {k.lower() for k in cur.keys()}
+            if ("name" in keys or "title" in keys) and ("price" in keys or "prices" in keys):
+                out.append(cur)
+            for v in cur.values():
+                stack.append(v)
+        elif isinstance(cur, list):
+            stack.extend(cur)
+    return out
 
-    for a in soup.find_all("a", href=True):
-        href = a.get("href", "")
-        
-        # Must be product link
-        if not href.startswith("/product/"):
-            continue
-        
-        text = a.get_text(" ", strip=True)
-        
-        # Must have price
-        if "грн" not in text.lower():
-            continue
+def normalize(raw: Dict[str, Any]) -> Dict[str, Any]:
+    title = raw.get("title") or raw.get("name") or ""
+    title = str(title).strip() if title else None
+    product_id = raw.get("id") or raw.get("sku") or raw.get("productId")
+    url = raw.get("url") or raw.get("link") or raw.get("productUrl")
+    if isinstance(url, str) and url.startswith("/"):
+        url = "https://silpo.ua" + url
 
-        key = href + "::" + text[:80]
-        if key in seen:
-            continue
-        seen.add(key)
+    def num(x):
+        try: return float(str(x).replace(",", "."))
+        except Exception: return None
 
-        parsed = _parse_prices(text)
-        if not parsed:
-            continue
-        
-        cur, old, disc, price_type = parsed
+    price_current = None
+    price_old = None
+    discount = None
 
-        title = re.sub(r"\s+", " ", text).strip()
-        brand = extract_brand(title)
-        ptype = extract_product_type(title)
-        fat = extract_fat_pct(title)
-        pack = extract_pack(title)
-        per_unit = compute_price_per_unit(cur, pack)
+    if "price" in raw:
+        price_current = num(raw.get("price"))
+    if isinstance(raw.get("prices"), dict):
+        p = raw["prices"]
+        price_current = price_current or num(p.get("current") or p.get("sale") or p.get("value"))
+        price_old = num(p.get("old") or p.get("regular") or p.get("base"))
 
-        rows.append(ProductRow(
-            run_id=run_id,
-            upload_ts=batch_stamp,
-            page_url=page_url,
-            page_number=page_number,
-            source="https://silpo.ua",
-            product_url="https://silpo.ua" + href,
-            product_id=None,
-            product_title=title,
-            brand=brand,
-            product_type=ptype,
-            fat_pct=fat,
-            pack_qty=pack.qty,
-            pack_unit=pack.unit or "",
-            price_current=cur,
-            price_old=old,
-            discount_pct=disc,
-            price_per_unit=per_unit,
-            rating=None,
-            price_type=price_type,
-            raw_json=None,
-        ))
+    discount = num(raw.get("discount") or raw.get("discountPct") or raw.get("discountPercent"))
 
-    return rows
+    brand = raw.get("brand")
+    if isinstance(brand, dict):
+        brand = brand.get("name") or brand.get("title")
+    brand = str(brand).strip() if brand else None
+
+    return {
+        "product_id": str(product_id) if product_id is not None else None,
+        "product_url": url if isinstance(url, str) else None,
+        "title": title,
+        "brand": brand,
+        "price_current": price_current,
+        "price_old": price_old,
+        "discount_pct": discount,
+        "raw_json": json.dumps(raw, ensure_ascii=False),
+    }
